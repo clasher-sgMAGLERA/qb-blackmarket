@@ -59,6 +59,158 @@ local function SpawnContactNPC()
     })
 end
 
+local function LoadAnimDict(dict)
+    RequestAnimDict(dict)
+    while not HasAnimDictLoaded(dict) do Wait(10) end
+end
+
+local function WaitForNPCToReachPosition(npc, targetCoords, maxDistance, timeout)
+    timeout = timeout or 30000
+    local startTime = GetGameTimer()
+    
+    while GetGameTimer() - startTime < timeout do
+        if not DoesEntityExist(npc) then return false end
+        
+        local npcCoords = GetEntityCoords(npc)
+        local distance = #(npcCoords - targetCoords)
+        
+        if distance <= maxDistance then
+            Wait(500)
+            return true
+        end
+        
+        Wait(100)
+    end
+    
+    return false
+end
+
+local function SpawnDeliveryNPC(deliveryData)
+    local npcSpawnPos = deliveryData.npcSpawnPos
+    local targetLocation = deliveryData.deliveryLocation
+    local pedModel = GetHashKey(Config.DeliveryNPCModel)
+    
+    RequestModel(pedModel)
+    while not HasModelLoaded(pedModel) do Wait(100) end
+    
+    deliveryNPC = CreatePed(4, pedModel, npcSpawnPos.x, npcSpawnPos.y, npcSpawnPos.z, npcSpawnPos.w, false, true)
+    SetEntityAsMissionEntity(deliveryNPC, true, true)
+    SetPedFleeAttributes(deliveryNPC, 0, false)
+    SetPedCombatAttributes(deliveryNPC, 17, true)
+    SetBlockingOfNonTemporaryEvents(deliveryNPC, true)
+    SetEntityInvincible(deliveryNPC, true)
+    
+    LoadAnimDict("anim@heists@box_carry@")
+    Wait(500)
+    
+    local boxModel = GetHashKey('prop_cs_cardbox_01')
+    RequestModel(boxModel)
+    while not HasModelLoaded(boxModel) do Wait(10) end
+    
+    local handBoneIndex = GetPedBoneIndex(deliveryNPC, 28422)
+    local handCoords = GetWorldPositionOfEntityBone(deliveryNPC, handBoneIndex)
+    
+    local crateProp = CreateObject(boxModel, handCoords.x, handCoords.y, handCoords.z, true, true, false)
+    SetEntityAsMissionEntity(crateProp, true, true)
+    SetEntityAlpha(crateProp, 0, false)
+    Wait(50)
+    
+    AttachEntityToEntity(crateProp, deliveryNPC, handBoneIndex, 0.0, -0.1, 0.0, 0.0, 0.0, 0.0, true, true, false, true, 1, true)
+    SetEntityAlpha(crateProp, 255, false)
+    
+    TaskPlayAnim(deliveryNPC, "anim@heists@box_carry@", "idle", 8.0, -8.0, -1, 49, 0, false, false, false)
+    
+    CreateThread(function()
+        local animNPC = deliveryNPC
+        local animProp = crateProp
+        while DoesEntityExist(animProp) and IsEntityAttachedToEntity(animProp, animNPC) do
+            if not IsEntityPlayingAnim(animNPC, "anim@heists@box_carry@", "idle", 3) then
+                TaskPlayAnim(animNPC, "anim@heists@box_carry@", "idle", 8.0, -8.0, -1, 49, 0, false, false, false)
+            end
+            Wait(500)
+        end
+    end)
+    
+    TaskGoStraightToCoord(deliveryNPC, targetLocation.x, targetLocation.y, targetLocation.z, 1.0, 30000, 0.0, 0)
+    
+    CreateThread(function()
+        local arrivalTimeout = 0
+        local maxWaitTime = 300000
+        local threadNPC = deliveryNPC
+        local threadProp = crateProp
+        local threadSpawnPos = npcSpawnPos
+        
+        while isWaitingForDelivery and arrivalTimeout < maxWaitTime do
+            Wait(1000)
+            arrivalTimeout = arrivalTimeout + 1000
+            
+            if threadNPC and DoesEntityExist(threadNPC) then
+                local playerPed = PlayerPedId()
+                local npcCoords = GetEntityCoords(threadNPC)
+                local playerCoords = GetEntityCoords(playerPed)
+                local distance = #(npcCoords - playerCoords)
+                
+                if distance < 3.0 then
+                    TaskTurnPedToFaceEntity(threadNPC, playerPed, 2000)
+                    Wait(2000)
+                    
+                    if DoesEntityExist(threadProp) then
+                        DetachEntity(threadProp, true, true)
+                        local propCoords = GetEntityCoords(playerPed)
+                        SetEntityCoords(threadProp, propCoords.x, propCoords.y, propCoords.z + 0.3, false, false, false, false)
+                        Wait(1000)
+                        if DoesEntityExist(threadProp) then
+                            DeleteEntity(threadProp)
+                        end
+                    end
+                    
+                    ClearPedTasks(threadNPC)
+                    Wait(300)
+                    
+                    QBCore.Functions.Notify('Delivery received', 'success')
+                    TriggerServerEvent('qb-blackmarket:server:giveItems')
+                    
+                    Wait(2000)
+                    
+                    if DoesEntityExist(threadNPC) then
+                        TaskGoStraightToCoord(threadNPC, threadSpawnPos.x, threadSpawnPos.y, threadSpawnPos.z, 1.0, 30000, 0.0, 0)
+                        
+                        Wait(30000)
+                        
+                        if DoesEntityExist(threadNPC) then
+                            SetEntityAsMissionEntity(threadNPC, true, true)
+                            DeleteEntity(threadNPC)
+                        end
+                        if DoesEntityExist(threadProp) then
+                            DeleteEntity(threadProp)
+                        end
+                    end
+                    
+                    isWaitingForDelivery = false
+                    deliveryNPC = nil
+                    break
+                end
+            else
+                isWaitingForDelivery = false
+                deliveryNPC = nil
+                break
+            end
+        end
+        
+        if arrivalTimeout >= maxWaitTime then
+            QBCore.Functions.Notify('Delivery timed out', 'error')
+            isWaitingForDelivery = false
+            if DoesEntityExist(threadNPC) then
+                SetEntityAsMissionEntity(threadNPC, true, true)
+                DeleteEntity(threadNPC)
+            end
+            if DoesEntityExist(threadProp) then
+                DeleteEntity(threadProp)
+            end
+            deliveryNPC = nil
+        end
+    end)
+end
 
 RegisterNetEvent('qb-blackmarket:client:addToOrder', function(data)
     local input = exports['qb-input']:ShowInput({
@@ -132,7 +284,25 @@ local function StartDeliveryThread()
                 if dist < 5.0 then
                     waitingAtLocation = true
                     QBCore.Functions.Notify('Wait here for ' .. Config.WaitTime .. ' seconds...', 'info')
-                    -- Still figuring out what to do here
+                    local waitTime = 0
+                    while waitTime < Config.WaitTime do
+                        Wait(1000)
+                        waitTime = waitTime + 1
+                        local currentDist = #(GetEntityCoords(PlayerPedId()) - targetLocation)
+                        if currentDist > 10.0 then
+                            QBCore.Functions.Notify('You left the delivery location', 'error')
+                            waitingAtLocation = false
+                            break
+                        end
+                    end
+                    if waitingAtLocation then
+                        QBCore.Functions.Notify('Delivery incoming...', 'success')
+                        SpawnDeliveryNPC(deliveryLocation)
+                        deliveryLocation = nil
+                        waitingAtLocation = false
+                        deliveryThread = nil
+                        break
+                    end
                 end
             end
         end
