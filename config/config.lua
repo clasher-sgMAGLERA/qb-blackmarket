@@ -2,15 +2,23 @@ Config = {}
 
 Config.NPCLocation = vector4(1073.13, -698.3, 57.1, 142.17) -- Contact NPC location
 Config.NPCModel = 'g_m_y_mexgang_01'
-Config.DeliveryVehicle = 'rumpo'
 Config.DeliveryNPCModel = 'g_m_y_mexgang_01'
-Config.ContactFee = 500
-Config.WaitTime = 30 -- Seconds to wait at delivery location
+Config.ContactFee = 5000
+Config.WaitTime = 8 -- Seconds to wait at delivery location
 
 Config.DeliveryLocations = {
-    vector3(751.5, -1224.45, 24.77),
-    vector3(1202.98, -1360.77, 35.23),
-    vector3(14.0, -1809.39, 25.25),
+    {
+        deliveryLocation = vector3(710.52, 4174.86, 40.71),
+        npcSpawnPos = vector4(785.35, 4192.43, 40.88, 85.71)
+    },
+    {
+        deliveryLocation = vector3(1963.32, 5163.19, 47.27),
+        npcSpawnPos = vector4(1963.94, 5188.54, 47.99, 179.83)
+    },
+    {
+        deliveryLocation = vector3(2853.82, 4485.25, 48.32),
+        npcSpawnPos = vector4(2880.42, 4514.49, 47.72, 143.47)
+    },
 }
 
 Config.Items = {
