@@ -16,16 +16,30 @@ RegisterNetEvent('qb-blackmarket:server:giveItems', function()
     local src = source
     local Player = QBCore.Functions.GetPlayer(src)
     if not Player or not orderedItems[src] then return end
+    local itemLookup = {}
+    for i = 1, #Config.Items do
+        itemLookup[Config.Items[i].item] = Config.Items[i]
+    end
     local total = 0
+    local validItems = {}
     for itemName, qty in pairs(orderedItems[src]) do
-        for i = 1, #Config.Items do
-            if Config.Items[i].item == itemName then
-                total = total + (Config.Items[i].price * qty)
-                exports['qb-inventory']:AddItem(src, itemName, qty)
-                TriggerClientEvent('qb-inventory:client:ItemBox', src, QBCore.Shared.Items[itemName], 'add', qty)
-                break
-            end
+        local itemConfig = itemLookup[itemName]
+        if not itemConfig then
+            TriggerClientEvent('QBCore:Notify', src, 'Invalid item in order: ' .. itemName, 'error')
+            orderedItems[src] = nil
+            return
         end
+        total = total + (itemConfig.price * qty)
+        validItems[itemName] = qty
+    end
+    if Player.PlayerData.money.cash < total then
+        orderedItems[src] = nil
+        TriggerClientEvent('QBCore:Notify', src, 'You don\'t have enough cash', 'error')
+        return
+    end
+    for itemName, qty in pairs(validItems) do
+        exports['qb-inventory']:AddItem(src, itemName, qty)
+        TriggerClientEvent('qb-inventory:client:ItemBox', src, QBCore.Shared.Items[itemName], 'add', qty)
     end
     Player.Functions.RemoveMoney('cash', total)
     orderedItems[src] = nil
